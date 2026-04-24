@@ -76,6 +76,75 @@ app.delete('/tasks/:id', authenticate, async (req, res) => {
   if (error) return res.status(400).json({ error });
   res.json({ success: true });
 });
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB limit
 
+// POST /tasks/:id/upload — attach an image to a task
+app.post('/tasks/:id/upload', authenticate, upload.single('image'), async (req, res) => {
+  const { id } = req.params;
+
+  if (!req.file) return res.status(400).json({ error: 'No file provided' });
+
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  if (!allowedTypes.includes(req.file.mimetype)) {
+    return res.status(400).json({ error: 'Only image files are allowed' });
+  }
+
+  // Store under: userId/taskId-timestamp.ext
+  const ext = req.file.originalname.split('.').pop();
+  const filePath = `${req.user.id}/${id}-${Date.now()}.${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('task-attachments')
+    .upload(filePath, req.file.buffer, {
+      contentType: req.file.mimetype,
+      upsert: true
+    });
+
+  if (uploadError) return res.status(500).json({ error: uploadError.message });
+
+  // Get the public URL
+  const { data: { publicUrl } } = supabase.storage
+    .from('task-attachments')
+    .getPublicUrl(filePath);
+
+  // Save URL to the task row
+  const { data, error } = await supabase.from('tasks')
+    .update({ file_url: publicUrl })
+    .eq('id', id)
+    .eq('user_id', req.user.id)
+    .select().single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ task: data, url: publicUrl });
+});
+
+// DELETE /tasks/:id/image — remove image from a task
+app.delete('/tasks/:id/image', authenticate, async (req, res) => {
+  const { id } = req.params;
+
+  // Get current file_url
+  const { data: task } = await supabase.from('tasks')
+    .select('file_url')
+    .eq('id', id)
+    .eq('user_id', req.user.id)
+    .single();
+
+  if (task?.file_url) {
+    // Extract path from the URL
+    const path = task.file_url.split('/task-attachments/')[1];
+    await supabase.storage.from('task-attachments').remove([path]);
+  }
+
+  // Clear the file_url in DB
+  const { data, error } = await supabase.from('tasks')
+    .update({ file_url: null })
+    .eq('id', id)
+    .eq('user_id', req.user.id)
+    .select().single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ task: data });
+});
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
