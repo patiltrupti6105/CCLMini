@@ -95,7 +95,7 @@ app.post('/tasks/:id/upload', authenticate, upload.single('image'), async (req, 
   const filePath = `${req.user.id}/${id}-${Date.now()}.${ext}`;
 
   const { error: uploadError } = await supabase.storage
-    .from('task-attachments')
+    .from('images')
     .upload(filePath, req.file.buffer, {
       contentType: req.file.mimetype,
       upsert: true
@@ -105,7 +105,7 @@ app.post('/tasks/:id/upload', authenticate, upload.single('image'), async (req, 
 
   // Get the public URL
   const { data: { publicUrl } } = supabase.storage
-    .from('task-attachments')
+    .from('images')
     .getPublicUrl(filePath);
 
   // Save URL to the task row
@@ -132,8 +132,8 @@ app.delete('/tasks/:id/image', authenticate, async (req, res) => {
 
   if (task?.file_url) {
     // Extract path from the URL
-    const path = task.file_url.split('/task-attachments/')[1];
-    await supabase.storage.from('task-attachments').remove([path]);
+    const path = task.file_url.split('/images/')[1];
+    await supabase.storage.from('images').remove([path]);
   }
 
   // Clear the file_url in DB
